@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(UhbikWrapper VERSION 0.0.1)
+project(UhbikWrapper VERSION 0.3.2)
 
 # Import JUCE using FetchContent
 include(FetchContent)
