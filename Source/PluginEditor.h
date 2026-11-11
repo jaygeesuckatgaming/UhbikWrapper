@@ -61,6 +61,7 @@ private:
     juce::ComboBox typeFilter;    // Filter by Effects/Instruments/All
     juce::TextButton addButton{"+"};
     juce::TextButton viewMenuButton{"View"};
+    juce::TextButton rescanButton{"Rescan"};
 
     float uiScale = 1.0f;
     std::unique_ptr<PresetBrowser> presetBrowser;
@@ -85,6 +86,7 @@ private:
     void loadPreset();
     void setUIScale(float scale);
     void showViewMenu();
+    void beginRescan();
     void updateDuckerUI();
 
     // Ducker panel (collapsible)

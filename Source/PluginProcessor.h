@@ -156,6 +156,12 @@ public:
 
     // Chain management methods
     void scanForPlugins();
+    // Re-scan the standard VST3 folders, prune plug-ins that were uninstalled,
+    // refresh the cache and notify the editor. Called by the Rescan button.
+    void rescanPlugins();
+    // Cached copy of knownPluginList so loading the wrapper does not have to
+    // scan every plug-in folder inside the constructor (which blocks the host).
+    static juce::File getPluginCacheFile();
     void addPlugin(const juce::PluginDescription& desc);  // VST3
     void addPlugin(const CLAPPluginDescription& desc);    // CLAP
     void addPlugin(const UnifiedPluginDescription& desc); // Unified
@@ -267,6 +273,12 @@ public:
     float getModulationSourceValue(ModSourceType type, int index) const;
 
 private:
+    // Plug-in cache helpers
+    bool loadPluginCache();
+    void savePluginCache();
+    void rebuildUnifiedPluginList();
+    std::atomic<uint32_t> scanGeneration{0};
+
     // Ducker envelope state (audio thread only)
     float duckerEnvelope = 0.0f;
     float duckerHoldCounter = 0.0f;
