@@ -50,6 +50,11 @@ UhbikWrapperAudioProcessorEditor::UhbikWrapperAudioProcessorEditor (UhbikWrapper
     viewMenuButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
     addAndMakeVisible(viewMenuButton);
 
+    rescanButton.addListener(this);
+    rescanButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
+    rescanButton.setTooltip("Re-scan the VST3 folders so newly installed plug-ins appear without restarting the host");
+    addAndMakeVisible(rescanButton);
+
     populatePluginSelector();
     // Don't call refreshChainDisplay() here — resized() will call it
     // with proper viewport dimensions after the component is laid out.
@@ -484,6 +489,7 @@ UhbikWrapperAudioProcessorEditor::~UhbikWrapperAudioProcessorEditor()
     typeFilter.removeListener(this);
     addButton.removeListener(this);
     viewMenuButton.removeListener(this);
+    rescanButton.removeListener(this);
     duckerToggleButton.removeListener(this);
     duckerEnableButton.removeListener(this);
     duckerThresholdSlider.removeListener(this);
@@ -753,6 +759,10 @@ void UhbikWrapperAudioProcessorEditor::buttonClicked(juce::Button* button)
     else if (button == &viewMenuButton)
     {
         showViewMenu();
+    }
+    else if (button == &rescanButton)
+    {
+        beginRescan();
     }
     else if (button == &duckerToggleButton)
     {
@@ -1435,8 +1445,10 @@ void UhbikWrapperAudioProcessorEditor::openPluginEditor(int slotIndex)
         return;
     }
 
-    // Create the editor only once per plugin instance
-    auto* editor = plugin->createEditor();
+    // Create the editor only once per plugin instance. Current JUCE keeps
+    // createEditor() private; this is the public entry point that also makes
+    // the editor the processor's active editor.
+    auto* editor = plugin->createEditorAndMakeActive();
     if (editor == nullptr)
         return;
 
@@ -1659,6 +1671,7 @@ void UhbikWrapperAudioProcessorEditor::resized()
 
     // View menu button after title
     viewMenuButton.setBounds(browserWidth + 170, buttonY, 50, 28);
+    rescanButton.setBounds(browserWidth + 226, buttonY, 70, 28);
 
     // Footer area
     bounds.removeFromBottom(30);
@@ -1987,6 +2000,29 @@ void UhbikWrapperAudioProcessorEditor::setUIScale(float scale)
     setScaleFactor(scale);
 }
 
+void UhbikWrapperAudioProcessorEditor::beginRescan()
+{
+    if (!rescanButton.isEnabled())
+        return;
+
+    rescanButton.setEnabled(false);
+    rescanButton.setButtonText("Scanning...");
+
+    // Let the editor repaint the new button state before the synchronous scan
+    // starts, so the window is not left showing a stale frame.
+    juce::Component::SafePointer<UhbikWrapperAudioProcessorEditor> safe(this);
+    juce::MessageManager::callAsync([safe]() mutable
+    {
+        if (safe == nullptr)
+            return;
+
+        safe->audioProcessor.rescanPlugins();
+        safe->rescanButton.setButtonText("Rescan");
+        safe->rescanButton.setEnabled(true);
+        safe->populatePluginSelector();
+    });
+}
+
 void UhbikWrapperAudioProcessorEditor::showViewMenu()
 {
     juce::PopupMenu menu;
@@ -1997,6 +2033,9 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
     menu.addItem(20, "Show All", true, currentFilter == 1);
     menu.addItem(21, "CLAP Only", true, currentFilter == 2);
     menu.addItem(22, "VST3 Only", true, currentFilter == 3);
+
+    menu.addSeparator();
+    menu.addItem(30, "Rescan Plug-ins", true, false);
 
     menu.addSeparator();
     menu.addSectionHeader("Zoom");
@@ -2019,6 +2058,7 @@ void UhbikWrapperAudioProcessorEditor::showViewMenu()
                 case 3: setUIScale(2.0f); break;
                 case 4: setUIScale(3.0f); break;
                 case 10: audioProcessor.debugLogging.store(!audioProcessor.debugLogging.load()); break;
+                case 30: beginRescan(); break;
                 case 20: formatFilter.setSelectedId(1); populatePluginSelector(); break;
                 case 21: formatFilter.setSelectedId(2); populatePluginSelector(); break;
                 case 22: formatFilter.setSelectedId(3); populatePluginSelector(); break;

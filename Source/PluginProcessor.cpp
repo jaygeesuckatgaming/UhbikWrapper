@@ -54,10 +54,19 @@ UhbikWrapperAudioProcessor::UhbikWrapperAudioProcessor()
 
     pluginFormatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
 
-    std::cerr << "[RACK] Scanning VST3..." << std::endl;
-    std::cerr.flush();
-
-    scanForPlugins();
+    if (loadPluginCache())
+    {
+        std::cerr << "[RACK] Plug-in list restored from cache ("
+                  << availablePlugins.size() << " VST3)" << std::endl;
+        std::cerr.flush();
+    }
+    else
+    {
+        std::cerr << "[RACK] No plug-in cache, scanning VST3..." << std::endl;
+        std::cerr.flush();
+        scanForPlugins();
+        savePluginCache();
+    }
 
     std::cerr << "[RACK] === CONSTRUCTOR DONE ===" << std::endl;
     std::cerr.flush();
@@ -79,7 +88,14 @@ UhbikWrapperAudioProcessor::~UhbikWrapperAudioProcessor()
 
 void UhbikWrapperAudioProcessor::scanForPlugins()
 {
+    // Any scan that is still running (the deferred CLAP pass) must not append
+    // its results into this newer list.
+    const auto generation = ++scanGeneration;
+
     availablePlugins.clear();
+    // Clearing first means plug-ins that were uninstalled disappear instead of
+    // lingering forever in the list.
+    knownPluginList.clear();
 
     // === Scan VST3 plugins ===
     juce::FileSearchPath searchPath;
@@ -134,18 +150,7 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
     }
 
     // Add VST3 plugins to unified list
-    for (const auto& vst3Desc : knownPluginList.getTypes())
-    {
-        UnifiedPluginDescription unified;
-        unified.format = UnifiedPluginDescription::Format::VST3;
-        unified.name = vst3Desc.name;
-        unified.pluginId = vst3Desc.uniqueId != 0 ? juce::String(vst3Desc.uniqueId) : vst3Desc.fileOrIdentifier;
-        unified.pluginPath = vst3Desc.fileOrIdentifier;
-        unified.vendor = vst3Desc.manufacturerName;
-        unified.isInstrument = vst3Desc.isInstrument;
-        unified.vst3Desc = vst3Desc;
-        availablePlugins.push_back(unified);
-    }
+    rebuildUnifiedPluginList();
 
     std::cerr << "[RACK] VST3 plugins found: " << knownPluginList.getNumTypes() << std::endl << std::flush;
 
@@ -153,7 +158,9 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
     // Delay CLAP scan slightly to avoid conflicts with library loading during project restore
     std::cerr << "[RACK] Deferring CLAP scan..." << std::endl;
     std::cerr.flush();
-    juce::Timer::callAfterDelay(500, [this]() {
+    juce::Timer::callAfterDelay(500, [this, generation]() {
+        if (generation != scanGeneration.load())
+            return;
         std::cerr << "[RACK] Starting deferred CLAP scan..." << std::endl;
         std::cerr.flush();
         clapScanner.clear();
@@ -180,6 +187,9 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
             unified.clapDesc = clapDesc;
             availablePlugins.push_back(unified);
         }
+        if (generation != scanGeneration.load())
+            return;
+
         std::cerr << "[RACK] CLAP plugins added. Total plugins: " << availablePlugins.size() << std::endl;
         std::cerr.flush();
 
@@ -190,6 +200,111 @@ void UhbikWrapperAudioProcessor::scanForPlugins()
     // VST3 plugins are available immediately, CLAP plugins will be added after delay
     std::cerr << "[RACK] VST3 plugins available immediately: " << availablePlugins.size() << std::endl;
     std::cerr.flush();
+}
+
+juce::File UhbikWrapperAudioProcessor::getPluginCacheFile()
+{
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("UhbikWrapper")
+        .getChildFile("plugin-list.xml");
+}
+
+void UhbikWrapperAudioProcessor::rebuildUnifiedPluginList()
+{
+    availablePlugins.clear();
+
+    for (const auto& vst3Desc : knownPluginList.getTypes())
+    {
+        UnifiedPluginDescription unified;
+        unified.format = UnifiedPluginDescription::Format::VST3;
+        unified.name = vst3Desc.name;
+        unified.pluginId = vst3Desc.uniqueId != 0 ? juce::String(vst3Desc.uniqueId)
+                                                 : vst3Desc.fileOrIdentifier;
+        unified.pluginPath = vst3Desc.fileOrIdentifier;
+        unified.vendor = vst3Desc.manufacturerName;
+        unified.isInstrument = vst3Desc.isInstrument;
+        unified.vst3Desc = vst3Desc;
+        availablePlugins.push_back(unified);
+    }
+}
+
+bool UhbikWrapperAudioProcessor::loadPluginCache()
+{
+    const auto file = getPluginCacheFile();
+    if (!file.existsAsFile())
+    {
+        std::cerr << "[RACK] plugin cache: missing " << file.getFullPathName() << std::endl;
+        return false;
+    }
+
+    auto xml = juce::XmlDocument::parse(file);
+    if (xml == nullptr)
+    {
+        std::cerr << "[RACK] plugin cache: cannot parse " << file.getFullPathName() << std::endl;
+        return false;
+    }
+
+    knownPluginList.clear();
+    knownPluginList.recreateFromXml(*xml);
+    if (knownPluginList.getNumTypes() == 0)
+    {
+        std::cerr << "[RACK] plugin cache: no types in " << file.getFullPathName() << std::endl;
+        return false;
+    }
+
+    // Drop entries whose bundle has been deleted since the cache was written.
+    std::vector<juce::PluginDescription> keep;
+    const auto types = knownPluginList.getTypes();
+    keep.reserve(static_cast<size_t>(types.size()));
+    for (const auto& desc : types)
+    {
+        const auto path = desc.fileOrIdentifier;
+        if (path.isEmpty() || juce::File(path).exists())
+            keep.push_back(desc);
+    }
+
+    if (keep.size() != types.size())
+    {
+        knownPluginList.clear();
+        for (const auto& desc : keep)
+            knownPluginList.addType(desc);
+        savePluginCache();
+    }
+
+    rebuildUnifiedPluginList();
+    return !availablePlugins.empty();
+}
+
+void UhbikWrapperAudioProcessor::savePluginCache()
+{
+    auto file = getPluginCacheFile();
+    file.getParentDirectory().createDirectory();
+
+    auto xml = knownPluginList.createXml();
+    if (xml == nullptr)
+    {
+        std::cerr << "[RACK] plugin cache: nothing to save" << std::endl;
+        return;
+    }
+
+    auto temp = file.getSiblingFile(file.getFileName() + ".tmp");
+    if (!xml->writeTo(temp))
+    {
+        std::cerr << "[RACK] plugin cache: cannot write "
+                  << temp.getFullPathName() << std::endl;
+        return;
+    }
+
+    if (!temp.moveFileTo(file))
+        std::cerr << "[RACK] plugin cache: cannot replace "
+                  << file.getFullPathName() << std::endl;
+}
+
+void UhbikWrapperAudioProcessor::rescanPlugins()
+{
+    scanForPlugins();
+    savePluginCache();
+    sendChangeMessage();
 }
 
 void UhbikWrapperAudioProcessor::addPlugin(const juce::PluginDescription& desc)

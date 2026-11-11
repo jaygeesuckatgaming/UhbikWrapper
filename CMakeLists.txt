@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(UhbikWrapper VERSION 0.0.1)
+project(UhbikWrapper VERSION 0.3.2)
 
 # Import JUCE using FetchContent
 include(FetchContent)
@@ -27,6 +27,11 @@ else()
     set(PLUGIN_FORMATS VST3 Standalone)
 endif()
 
+# Copying the built VST3 into C:\Program Files needs an elevated shell. Allow a
+# normal user build to skip that step and install the bundle by hand or to
+# %APPDATA%\VST3 instead.
+option(UHBIK_COPY_PLUGIN_AFTER_BUILD "Copy the built VST3 to the system VST3 folder" ON)
+
 # Create the plugin target
 # Note: PRODUCT_NAME has no space to avoid Bitwig/macOS compatibility issues
 juce_add_plugin(UhbikWrapper
@@ -37,7 +42,7 @@ juce_add_plugin(UhbikWrapper
     NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
-    COPY_PLUGIN_AFTER_BUILD TRUE
+    COPY_PLUGIN_AFTER_BUILD ${UHBIK_COPY_PLUGIN_AFTER_BUILD}
     PLUGIN_MANUFACTURER_CODE IncA
     PLUGIN_CODE UhWr
     FORMATS ${PLUGIN_FORMATS}
