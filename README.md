@@ -1,9 +1,8 @@
 # Uhbik Wrapper
 
 UhbikWrapper 0.3.2 (patched build)
-https://github.com/jaygeesuckatgaming/UhbikWrapper/blob/master/Release/UhbikWrapper.vst_3_0.3.2.rar
 ==================================
-
+https://github.com/jaygeesuckatgaming/UhbikWrapper/blob/master/Release/UhbikWrapper.vst_3_0.3.2.rar
 Upstream: https://github.com/dlarseninclusive/UhbikWrapper
 Fork:     https://github.com/jaygeesuckatgaming/UhbikWrapper
           branch feature/rescan-plugins
